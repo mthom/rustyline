@@ -71,6 +71,14 @@ pub fn execute<H: Helper>(
             if s.line.is_empty() {
                 return Err(error::ReadlineError::Eof);
             } else if !input_state.is_emacs_mode() {
+                if !config.remove_trailing_newline() {
+                    if cfg!(windows) {
+                        s.edit_insert('\r', 1)?;
+                    }
+
+                    s.edit_insert('\n', 1)?;
+                }
+
                 return Ok(Submit);
             }
         }
@@ -139,6 +147,14 @@ pub fn execute<H: Helper>(
                     true,
                     _,
                 ) => {
+                    if !config.remove_trailing_newline() {
+                        if cfg!(windows) {
+                            s.edit_insert('\r', 1)?;
+                        }
+
+                        s.edit_insert('\n', 1)?;
+                    }
+
                     return Ok(Submit);
                 }
                 (Cmd::AcceptOrInsertLine { .. }, false, _)

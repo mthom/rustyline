@@ -161,6 +161,7 @@ fn test_readline_direct() {
         Cursor::new("([)\n\u{0008}\n\n\r\n])".as_bytes()),
         Cursor::new(&mut write_buf),
         &Some(crate::validate::MatchingBracketValidator::new()),
+        &Config::builder().build(),
     );
 
     assert_eq!(
@@ -168,4 +169,24 @@ fn test_readline_direct() {
         b"Mismatched brackets: '[' is not properly closed"
     );
     assert_eq!(&output.unwrap(), "([\n\n\r\n])");
+}
+
+#[test]
+fn test_readline_direct_without_newline_removal() {
+    use std::io::Cursor;
+
+    let mut write_buf = vec![];
+    let output = readline_direct(
+        Cursor::new("hello\n".as_bytes()),
+        Cursor::new(&mut write_buf),
+        &None::<()>,
+        &Config::builder()
+            .remove_trailing_newline(false)
+            .build(),
+    );
+
+    assert_eq!(
+        output.unwrap().as_str(),
+        "hello\n",
+    );
 }

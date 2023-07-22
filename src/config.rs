@@ -35,6 +35,8 @@ pub struct Config {
     check_cursor_position: bool,
     /// Bracketed paste on unix platform
     enable_bracketed_paste: bool,
+    /// Whether to remove trailing newline
+    remove_trailing_newline: bool,
 }
 
 impl Config {
@@ -193,6 +195,13 @@ impl Config {
     pub fn enable_bracketed_paste(&self) -> bool {
         self.enable_bracketed_paste
     }
+
+    /// Whether the trailing newline is removed.
+    ///
+    /// By default, it's enabled.
+    pub fn remove_trailing_newline(&self) -> bool {
+        self.remove_trailing_newline
+    }
 }
 
 impl Default for Config {
@@ -213,6 +222,7 @@ impl Default for Config {
             indent_size: 2,
             check_cursor_position: false,
             enable_bracketed_paste: true,
+            remove_trailing_newline: true,
         }
     }
 }
@@ -450,6 +460,14 @@ impl Builder {
         self
     }
 
+    /// Enable or disable removal of trailing newlines.
+    ///
+    /// By default, it's enabled.
+    pub fn remove_trailing_newline(mut self, enabled: bool) -> Self {
+        self.set_remove_trailing_newline(enabled);
+        self
+    }
+
     /// Builds a `Config` with the settings specified so far.
     #[must_use]
     pub fn build(self) -> Config {
@@ -472,6 +490,13 @@ pub trait Configurer {
     fn set_max_history_size(&mut self, max_size: usize) -> Result<()> {
         self.config_mut().set_max_history_size(max_size);
         Ok(())
+    }
+
+    /// Enable or disable removal of trailing newlines.
+    ///
+    /// By default, it's enabled.
+    fn set_remove_trailing_newline(&mut self, enabled: bool) {
+        self.config_mut().remove_trailing_newline = enabled;
     }
 
     /// Tell if lines which match the previous history entry are saved or not

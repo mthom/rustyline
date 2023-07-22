@@ -480,65 +480,6 @@ fn apply_backspace_direct(input: &str) -> String {
     out
 }
 
-fn readline_direct(
-    mut reader: impl BufRead,
-    mut writer: impl Write,
-    validator: &Option<impl Validator>,
-) -> Result<String> {
-    let mut input = String::new();
-
-    loop {
-        if reader.read_line(&mut input)? == 0 {
-            return Err(ReadlineError::Eof);
-        }
-        // Remove trailing newline
-        let trailing_n = input.ends_with('\n');
-        let trailing_r;
-
-        if trailing_n {
-            input.pop();
-            trailing_r = input.ends_with('\r');
-            if trailing_r {
-                input.pop();
-            }
-        } else {
-            trailing_r = false;
-        }
-
-        input = apply_backspace_direct(&input);
-
-        match validator.as_ref() {
-            None => return Ok(input),
-            Some(v) => {
-                let mut ctx = input.as_str();
-                let mut ctx = validate::ValidationContext::new(&mut ctx);
-
-                match v.validate(&mut ctx)? {
-                    validate::ValidationResult::Valid(msg) => {
-                        if let Some(msg) = msg {
-                            writer.write_all(msg.as_bytes())?;
-                        }
-                        return Ok(input);
-                    }
-                    validate::ValidationResult::Invalid(Some(msg)) => {
-                        writer.write_all(msg.as_bytes())?;
-                    }
-                    validate::ValidationResult::Incomplete => {
-                        // Add newline and keep on taking input
-                        if trailing_r {
-                            input.push('\r');
-                        }
-                        if trailing_n {
-                            input.push('\n');
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
-}
-
 /// Syntax specific helper.
 ///
 /// TODO Tokenizer/parser used for both completion, suggestion, highlighting.
@@ -579,6 +520,81 @@ impl<'h> Context<'h> {
     #[must_use]
     pub fn history_index(&self) -> usize {
         self.history_index
+    }
+}
+
+fn readline_direct(
+    mut reader: impl BufRead,
+    mut writer: impl Write,
+    validator: &Option<impl Validator>,
+    config: &Config,
+) -> Result<String> {
+    let mut input = String::new();
+
+    loop {
+        if reader.read_line(&mut input)? == 0 {
+            return Err(ReadlineError::Eof);
+        }
+
+        // Remove trailing newline
+        let trailing_n = input.ends_with('\n');
+        let trailing_r;
+
+        if trailing_n {
+            input.pop();
+            trailing_r = input.ends_with('\r');
+            if trailing_r {
+                input.pop();
+            }
+        } else {
+            trailing_r = false;
+        }
+
+        input = apply_backspace_direct(&input);
+
+        match validator.as_ref() {
+            None => {
+                return Ok(input);
+            }
+            Some(v) => {
+                let mut ctx = input.as_str();
+                let mut ctx = validate::ValidationContext::new(&mut ctx);
+
+                match v.validate(&mut ctx)? {
+                    validate::ValidationResult::Valid(msg) => {
+                        if let Some(msg) = msg {
+                            writer.write_all(msg.as_bytes())?;
+                        }
+
+                        if !config.remove_trailing_newline() {
+                            if trailing_r {
+                                input.push('\r');
+                            }
+                            if trailing_n {
+                                input.push('\n');
+                            }
+                        }
+
+                        return Ok(input);
+                    }
+                    validate::ValidationResult::Invalid(Some(msg)) => {
+                        writer.write_all(msg.as_bytes())?;
+                    }
+                    validate::ValidationResult::Incomplete => {
+                        // Add newline and keep on taking input
+                        if !config.remove_trailing_newline() {
+                            if trailing_r {
+                                input.push('\r');
+                            }
+                            if trailing_n {
+                                input.push('\n');
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
     }
 }
 
@@ -658,7 +674,7 @@ impl<H: Helper, I: History> Editor<H, I> {
             stdout.write_all(prompt.as_bytes())?;
             stdout.flush()?;
 
-            readline_direct(io::stdin().lock(), io::stderr(), &self.helper)
+            readline_direct(io::stdin().lock(), io::stderr(), &self.helper, &self.config)
         } else if self.term.is_input_tty() {
             let (original_mode, term_key_map) = self.term.enable_raw_mode()?;
             let guard = Guard(&original_mode);
@@ -669,12 +685,19 @@ impl<H: Helper, I: History> Editor<H, I> {
                 }
             }
             drop(guard); // disable_raw_mode(original_mode)?;
-            self.term.writeln()?;
+
+            let ends_with_newline = user_input.as_ref()
+                .map(|s| s.ends_with('\n'))
+                .unwrap_or(false);
+
+            if self.config.remove_trailing_newline() || !ends_with_newline {
+                self.term.writeln()?;
+            }
             user_input
         } else {
             debug!(target: "rustyline", "stdin is not a tty");
             // Not a tty: read from file / pipe.
-            readline_direct(io::stdin().lock(), io::stderr(), &self.helper)
+            readline_direct(io::stdin().lock(), io::stderr(), &self.helper, &self.config)
         }
     }
 
@@ -781,7 +804,9 @@ impl<H: Helper, I: History> Editor<H, I> {
             // Execute things can be done solely on a state object
             match command::execute(cmd, &mut s, &input_state, &mut self.kill_ring, &self.config)? {
                 command::Status::Proceed => continue,
-                command::Status::Submit => break,
+                command::Status::Submit => {
+                    break
+                }
             }
         }
 
@@ -792,6 +817,7 @@ impl<H: Helper, I: History> Editor<H, I> {
         if cfg!(windows) {
             let _ = original_mode; // silent warning
         }
+
         Ok(s.line.into_string())
     }
 
